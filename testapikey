@@ -1,68 +1,196 @@
-# check_api_keys.py
-# Verifica varias API keys de https://api-tennis.com/
+# check_api_keys_streamlit.py
+# App en Streamlit para probar varias API keys de https://api-tennis.com/
 
-import requests
 import time
+import requests
+import pandas as pd
+import streamlit as st
 
 # --------------------------------------------------------------
-# LISTA TUS API KEYS AQUÍ
+# Configuración básica de la página
 # --------------------------------------------------------------
-API_KEYS = [
-    "AQUI_TU_APIKEY_1",
-    "AQUI_TU_APIKEY_2",
-    "AQUI_TU_APIKEY_3",
-]
+st.set_page_config(
+    page_title="🔑 Test API Keys · api-tennis.com",
+    layout="centered"
+)
 
-# Endpoint de prueba (sencillo y rápido)
-TEST_URL = "https://api-tennis.com/tennis/?method=get_countries&APIkey={}"
+st.title("🔑 Verificador de API keys · api-tennis.com")
+st.write(
+    "Pega abajo varias API keys de **api-tennis.com** (una por línea) y "
+    "haz clic en **Probar API keys** para verificar cuáles están funcionando."
+)
 
-def check_api_key(key):
-    url = TEST_URL.format(key)
+# --------------------------------------------------------------
+# Entrada de API keys
+# --------------------------------------------------------------
+st.subheader("1️⃣ API keys")
 
+default_example = "APIKEY_1_AQUI\nAPIKEY_2_AQUI\nAPIKEY_3_AQUI"
+
+keys_text = st.text_area(
+    "Pega aquí tus API keys (una por línea):",
+    value=default_example,
+    height=150,
+    help="Cada línea debe contener solo una API key."
+)
+
+timeout_sec = st.number_input(
+    "Timeout por request (segundos):",
+    min_value=1.0,
+    max_value=60.0,
+    value=10.0,
+    step=1.0
+)
+
+st.caption("El test usa el endpoint: `tennis/?method=get_countries` (es ligero y rápido).")
+
+
+# --------------------------------------------------------------
+# Función para probar una API key
+# --------------------------------------------------------------
+TEST_URL = "https://api-tennis.com/tennis/?method=get_countries&APIkey={api_key}"
+
+
+def mask_key(key: str, visible_start: int = 4, visible_end: int = 3) -> str:
+    """Enmascara la API key para no mostrarla completa en la interfaz."""
+    key = key.strip()
+    if len(key) <= visible_start + visible_end:
+        return "*" * len(key)
+    return f"{key[:visible_start]}****{key[-visible_end:]}"
+
+
+def check_api_key(key: str, timeout: float = 10.0):
+    """Hace un request de prueba a api-tennis.com para verificar la key."""
+    url = TEST_URL.format(api_key=key.strip())
     t0 = time.time()
     try:
-        response = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=timeout)
         elapsed = time.time() - t0
 
-        # Si responde 200 es válido
-        if response.status_code == 200:
-            data = response.json()
-            if "result" in data:
-                return True, elapsed, "OK"
-            else:
-                return False, elapsed, "200 pero sin datos válidos"
+        status_code = resp.status_code
 
-        # Errores comunes
-        elif response.status_code == 401:
-            return False, elapsed, "Unauthorized (API Key inválida)"
-        elif response.status_code == 429:
-            return False, elapsed, "Too Many Requests (límite alcanzado)"
+        # Intentamos leer JSON, pero la respuesta podría no serlo si hay error raro
+        try:
+            data = resp.json()
+        except Exception:
+            data = {}
+
+        # Lógica simple de validación
+        if status_code == 200:
+            if isinstance(data, dict) and "result" in data:
+                return {
+                    "ok": True,
+                    "status_code": status_code,
+                    "elapsed": elapsed,
+                    "msg": "OK (200 con 'result' en la respuesta)"
+                }
+            else:
+                return {
+                    "ok": False,
+                    "status_code": status_code,
+                    "elapsed": elapsed,
+                    "msg": "200 pero sin campo 'result' en la respuesta"
+                }
+
+        elif status_code == 401:
+            return {
+                "ok": False,
+                "status_code": status_code,
+                "elapsed": elapsed,
+                "msg": "401 Unauthorized (API key inválida o sin permisos)"
+            }
+        elif status_code == 403:
+            return {
+                "ok": False,
+                "status_code": status_code,
+                "elapsed": elapsed,
+                "msg": "403 Forbidden (acceso denegado)"
+            }
+        elif status_code == 429:
+            return {
+                "ok": False,
+                "status_code": status_code,
+                "elapsed": elapsed,
+                "msg": "429 Too Many Requests (límite de llamadas alcanzado)"
+            }
         else:
-            return False, elapsed, f"Error HTTP {response.status_code}"
+            return {
+                "ok": False,
+                "status_code": status_code,
+                "elapsed": elapsed,
+                "msg": f"Error HTTP {status_code}"
+            }
 
     except requests.exceptions.Timeout:
-        return False, None, "Timeout"
+        elapsed = time.time() - t0
+        return {
+            "ok": False,
+            "status_code": None,
+            "elapsed": elapsed,
+            "msg": "Timeout (no hubo respuesta dentro del límite)"
+        }
     except Exception as e:
-        return False, None, f"Excepción: {e}"
+        elapsed = time.time() - t0
+        return {
+            "ok": False,
+            "status_code": None,
+            "elapsed": elapsed,
+            "msg": f"Excepción: {e}"
+        }
 
 
-def main():
-    print("\n🚀 Probando API keys de https://api-tennis.com/\n")
+# --------------------------------------------------------------
+# Botón para ejecutar la prueba
+# --------------------------------------------------------------
+st.subheader("2️⃣ Ejecutar prueba")
 
-    for key in API_KEYS:
-        print(f"🔑 Probando: {key}")
+if st.button("🚀 Probar API keys"):
+    # Procesar el texto en una lista de keys
+    raw_lines = keys_text.splitlines()
+    api_keys = [line.strip() for line in raw_lines if line.strip()]
 
-        ok, ms, msg = check_api_key(key)
+    if not api_keys:
+        st.warning("No se encontró ninguna API key. Asegúrate de pegar al menos una.")
+    else:
+        st.info(f"Probando {len(api_keys)} API key(s)…")
 
-        if ok:
-            print(f"   ✅ OK | Tiempo: {ms:.2f} s | Mensaje: {msg}")
-        else:
-            print(f"   ❌ ERROR | {msg} | Tiempo: {ms if ms else 'N/A'}")
+        results = []
+        progress = st.progress(0)
+        status_placeholder = st.empty()
 
-        print("--------------------------------------------------")
+        for idx, key in enumerate(api_keys, start=1):
+            status_placeholder.write(f"Probando key {idx}/{len(api_keys)}…")
+            result = check_api_key(key, timeout=timeout_sec)
 
-    print("\n✔ Finalizado.\n")
+            results.append({
+                "API Key (enmascarada)": mask_key(key),
+                "¿Funciona?": "✅ Sí" if result["ok"] else "❌ No",
+                "HTTP Status": result["status_code"] if result["status_code"] is not None else "N/A",
+                "Tiempo (s)": round(result["elapsed"], 3) if result["elapsed"] is not None else None,
+                "Detalle": result["msg"],
+            })
 
+            progress.progress(idx / len(api_keys))
 
-if __name__ == "__main__":
-    main()
+        status_placeholder.write("Prueba finalizada ✔")
+
+        # Convertimos a DataFrame para mostrar tabla bonita
+        df_results = pd.DataFrame(results)
+
+        st.subheader("3️⃣ Resultados")
+        st.dataframe(df_results, use_container_width=True)
+
+        # Resumen rápido
+        ok_count = sum(1 for r in results if r["¿Funciona?"] == "✅ Sí")
+        fail_count = len(results) - ok_count
+
+        st.success(f"API keys OK: {ok_count} · API keys con error: {fail_count}")
+
+        # Opción para descargar resultados a CSV
+        csv_bytes = df_results.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="💾 Descargar resultados en CSV",
+            data=csv_bytes,
+            file_name="resultado_api_keys_api_tennis.csv",
+            mime="text/csv",
+        )

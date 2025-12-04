@@ -1,0 +1,68 @@
+# check_api_keys.py
+# Verifica varias API keys de https://api-tennis.com/
+
+import requests
+import time
+
+# --------------------------------------------------------------
+# LISTA TUS API KEYS AQUÍ
+# --------------------------------------------------------------
+API_KEYS = [
+    "AQUI_TU_APIKEY_1",
+    "AQUI_TU_APIKEY_2",
+    "AQUI_TU_APIKEY_3",
+]
+
+# Endpoint de prueba (sencillo y rápido)
+TEST_URL = "https://api-tennis.com/tennis/?method=get_countries&APIkey={}"
+
+def check_api_key(key):
+    url = TEST_URL.format(key)
+
+    t0 = time.time()
+    try:
+        response = requests.get(url, timeout=10)
+        elapsed = time.time() - t0
+
+        # Si responde 200 es válido
+        if response.status_code == 200:
+            data = response.json()
+            if "result" in data:
+                return True, elapsed, "OK"
+            else:
+                return False, elapsed, "200 pero sin datos válidos"
+
+        # Errores comunes
+        elif response.status_code == 401:
+            return False, elapsed, "Unauthorized (API Key inválida)"
+        elif response.status_code == 429:
+            return False, elapsed, "Too Many Requests (límite alcanzado)"
+        else:
+            return False, elapsed, f"Error HTTP {response.status_code}"
+
+    except requests.exceptions.Timeout:
+        return False, None, "Timeout"
+    except Exception as e:
+        return False, None, f"Excepción: {e}"
+
+
+def main():
+    print("\n🚀 Probando API keys de https://api-tennis.com/\n")
+
+    for key in API_KEYS:
+        print(f"🔑 Probando: {key}")
+
+        ok, ms, msg = check_api_key(key)
+
+        if ok:
+            print(f"   ✅ OK | Tiempo: {ms:.2f} s | Mensaje: {msg}")
+        else:
+            print(f"   ❌ ERROR | {msg} | Tiempo: {ms if ms else 'N/A'}")
+
+        print("--------------------------------------------------")
+
+    print("\n✔ Finalizado.\n")
+
+
+if __name__ == "__main__":
+    main()
